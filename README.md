@@ -1,161 +1,121 @@
 # Distributed ML Inference
 
-A runnable ML-serving project built around **async request handling, dynamic micro-batching, versioned model adapters, Prometheus metrics, load testing and AWS deployment infrastructure**.
+[![CI](https://github.com/cagataykavas/distributed-ml-inference/actions/workflows/ci.yml/badge.svg)](https://github.com/cagataykavas/distributed-ml-inference/actions/workflows/ci.yml)
 
-The point of this repository is not the toy classifier. The interesting part is the **serving system around the model**.
+A production-shaped Python inference runtime focused on the hard part around a model: **bounded admission, cancellation-safe dynamic batching, deadlines, lifecycle-safe shutdown, atomic model reloads, observability and reproducible SLO evidence**.
 
-## Architecture
+The bundled NumPy classifier is deliberately deterministic. The engineering subject is the serving control plane, not a fabricated accuracy claim.
+
+## Runtime architecture
 
 ```mermaid
 flowchart LR
-    C[Clients] --> ALB[ALB / ingress]
-    ALB --> API[FastAPI inference service]
-    API --> Q[Async request queue]
-    Q --> B[Dynamic micro-batcher]
-    B --> M[Model adapter]
-    M --> API
-    API --> METRICS[Prometheus /metrics]
-    METRICS --> OBS[Grafana / CloudWatch]
-
-    subgraph AWS
-      ALB
-      API --> ECS[ECS / EKS tasks]
-      ECS --> ECR[ECR image]
-      ECS --> S3[S3 model artifacts]
-    end
+    C[Clients] --> A[FastAPI admission]
+    A -->|accepted| Q[Bounded queue]
+    A -->|full| O[429 + Retry-After]
+    Q --> B[Dynamic batcher]
+    B --> S[Model snapshot]
+    S --> R[Per-request futures]
+    M[Validated reload] -->|atomic swap| S
+    A --> T[Metrics + runtime state]
 ```
 
-## Why dynamic batching?
+One request has exactly one terminal outcome. A queue-full request is rejected immediately instead of hiding in unbounded memory; a cancelled or expired queued future is removed from model work; a predictor contract failure fails the complete batch without killing the worker.
 
-GPU/accelerator inference is usually more efficient when multiple requests are executed together, but waiting too long to build a large batch damages latency. The service therefore uses a bounded policy:
+## Guarantees encoded in tests
 
-- collect the first request immediately;
-- wait up to a small latency budget (`max_wait_ms`);
-- stop as soon as `max_batch_size` is reached;
-- execute one `predict_batch` call;
-- route each output back to its original request future.
+| Concern | Runtime behavior | Evidence |
+|---|---|---|
+| Overload | `put_nowait` against a configured capacity; HTTP 429 with `Retry-After` | deterministic saturation test |
+| Cancellation | cancelled queued futures are filtered before model execution | predictor input assertion |
+| Deadline | end-to-end timeout cancels the future; later batches recover | timeout/recovery test |
+| Event loop | synchronous predictors execute via `asyncio.to_thread` | blocked-model ticker test |
+| Batch contract | output count must equal active input count | worker recovery test |
+| Shutdown | readiness closes before drain/cancel; queued futures receive a terminal error | lifecycle tests |
+| Reload | candidate warm-up precedes an atomic snapshot swap | in-flight old/new version test |
+| Bad model | non-finite candidate parameters never replace the active generation | quarantine test |
 
-The current defaults are **32 requests / 5 ms** and are intentionally configurable in code.
+## API surface
 
-## Service endpoints
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/health` | process liveness only |
+| `GET` | `/ready` | admission readiness, model generation and capacity |
+| `GET` | `/runtime` | queue/in-flight/counter snapshot |
+| `POST` | `/predict` | deadline-bound inference |
+| `POST` | `/admin/models/reload` | authenticated, validated atomic model swap |
+| `GET` | `/metrics` | Prometheus request, latency, queue and generation metrics |
 
-```text
-GET  /health    liveness
-GET  /ready     batch-worker + model metadata readiness
-POST /predict   inference
-GET  /metrics   Prometheus metrics
-```
-
-Start locally:
+Model reload is disabled unless `INFERENCE_ADMIN_TOKEN` is set. The token is compared with `secrets.compare_digest`; invalid candidates are warmed up and rejected before publication.
 
 ```bash
 pip install -e '.[dev]'
 uvicorn inference.service:app --reload
-```
 
-Request:
-
-```bash
-curl -X POST http://localhost:8000/predict \
+curl -s http://localhost:8000/predict \
   -H 'content-type: application/json' \
   -d '{"features": [0.8, 0.2, 0.5, -0.1]}'
 ```
 
-Example response:
+## Configuration
 
-```json
-{
-  "score": 0.62,
-  "label": 1,
-  "model": "synthetic-risk-model",
-  "version": "2026.08",
-  "latency_ms": 5.8
-}
-```
+| Environment variable | Default | Meaning |
+|---|---:|---|
+| `INFERENCE_MAX_BATCH_SIZE` | 32 | maximum active requests per model call |
+| `INFERENCE_MAX_WAIT_MS` | 5 | batch coalescing latency budget |
+| `INFERENCE_MAX_QUEUE_SIZE` | 256 | hard admission capacity |
+| `INFERENCE_REQUEST_TIMEOUT_MS` | 2000 | request deadline including queue time |
+| `INFERENCE_SHUTDOWN_TIMEOUT_MS` | 5000 | graceful drain budget |
+| `INFERENCE_ADMIN_TOKEN` | unset | enables protected reload endpoint |
 
-## Model adapter
+## SLO-gated load evidence
 
-`inference/model.py` defines a tiny adapter boundary. The included NumPy model makes CI deterministic, while the same `predict_batch` interface can be implemented by:
-
-- PyTorch;
-- ONNX Runtime;
-- TensorRT;
-- Triton client;
-- SageMaker/Vertex remote endpoint adapter.
-
-This keeps HTTP/batching/observability code independent from model format.
-
-## Metrics
-
-The service exports:
-
-- `inference_requests_total{status=...}`;
-- request latency histogram;
-- current queue depth;
-- observed dynamic batch sizes.
-
-These are the signals needed to reason about **throughput vs latency** rather than claiming autoscaling solves everything.
-
-## Load probe
-
-With the service running:
+`load_test.py` writes a machine-readable JSON report containing request totals, status distribution, throughput, success rate, and p50/p95/p99/max latency. It exits non-zero when either the latency or success-rate budget fails.
 
 ```bash
-python load_test.py --requests 1000 --concurrency 100
+python load_test.py \
+  --requests 1000 \
+  --concurrency 100 \
+  --max-p95-ms 250 \
+  --min-success-rate 0.99 \
+  --output artifacts/load-report.json
 ```
 
-The probe reports throughput, mean latency, p95 latency and max latency.
+CI also runs an in-process deterministic reference profile and uploads `inference-reference-evidence`. This is regression evidence for the implementation—not a cloud capacity claim.
 
-## AWS infrastructure
+## Model boundary and reload semantics
 
-This repository already includes Terraform and networking documentation for a conventional deployment shape:
+`ModelAdapter` exposes a typed `predict_batch` contract. `ModelManager` stores an immutable generation snapshot. A batch captures that snapshot once; if a reload completes while the batch is executing, every item in that batch still reports the old version and the following batch uses the new version. ONNX Runtime, PyTorch, TensorRT or a remote endpoint can implement the same boundary.
 
-- VPC with public/private subnets;
-- Internet Gateway + NAT;
-- security-group separation;
-- ECR;
-- ECS-oriented private inference tasks;
-- load-balancer entry boundary.
+## Packaging and deployment
 
-See `infra/aws/` and `docs/networking.md`.
+The multi-stage container builds a wheel, installs only runtime dependencies, runs as UID `10001`, and exposes a liveness healthcheck. One Uvicorn worker is intentional because the queue and model generation are process-local; horizontal scale should use replicas.
 
-## Container
+`infra/aws/` describes the surrounding VPC, public/private subnet separation, ALB-to-service security boundary, ECR and ECS cluster. `docs/networking.md` records routing and autoscaling tradeoffs. Infrastructure is an explicit deployment mapping, not proof that synthetic benchmarks represent a particular GPU instance.
 
-```bash
-docker build -t distributed-ml-inference .
-docker run --rm -p 8000:8000 distributed-ml-inference
-```
-
-One Uvicorn worker is used inside the container because the dynamic batch queue is process-local. Horizontal scale should happen by running **more service replicas**, each with its own model instance and batcher.
-
-## Failure modes worth discussing
-
-- queue growth under overload;
-- batching latency budget too large;
-- model OOM at high batch sizes;
-- unhealthy task still receiving traffic;
-- cold model loads;
-- downstream feature-store/cache timeout;
-- per-process queues when multiple workers are accidentally enabled;
-- autoscaler reacting to CPU while the real bottleneck is GPU utilization or queue depth.
-
-## Repository layout
+## Repository map
 
 ```text
-distributed-ml-inference/
-├── inference/
-│   ├── model.py
-│   └── service.py
-├── infra/aws/
-├── docs/networking.md
-├── tests/test_inference.py
-├── batcher.py
-├── load_test.py
-├── Dockerfile
-├── pyproject.toml
-└── .github/workflows/ci.yml
+batcher.py                  bounded batching runtime + lifecycle
+inference/config.py         validated environment configuration
+inference/model.py          deterministic model adapter
+inference/runtime.py        versioned atomic model snapshots
+inference/service.py        app factory, HTTP policy, metrics
+load_test.py                external SLO-gated load runner
+reference_benchmark.py      deterministic CI evidence producer
+tests/                      concurrency, lifecycle, API and SLO tests
+infra/aws/                  deployment topology
 ```
 
-## Interview topics demonstrated
+## Verification
 
-`dynamic batching` · `asyncio` · `FastAPI` · `latency vs throughput` · `backpressure` · `model adapters` · `Prometheus` · `Docker` · `ECS/EKS` · `ALB` · `private subnets` · `autoscaling`
+```bash
+ruff check .
+ruff format --check .
+pytest -q
+python -m build
+python reference_benchmark.py
+docker build -t distributed-ml-inference .
+```
+
+CI verifies source quality, 18 behavioral tests, an isolated wheel import, SLO artifact generation, a multi-stage image build and a live container readiness probe.

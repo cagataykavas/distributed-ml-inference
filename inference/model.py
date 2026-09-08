@@ -10,8 +10,7 @@ class ModelAdapter(Protocol):
     name: str
     version: str
 
-    def predict_batch(self, rows: list[list[float]]) -> list[dict[str, float | int | str]]:
-        ...
+    def predict_batch(self, rows: list[list[float]]) -> list[dict[str, float | int | str]]: ...
 
 
 @dataclass
@@ -33,6 +32,11 @@ class LinearRiskModel:
         matrix = np.asarray(rows, dtype=float)
         if matrix.ndim != 2 or matrix.shape[1] != len(self.weights):
             raise ValueError(f"expected {len(self.weights)} features per request")
+        if not np.isfinite(matrix).all():
+            raise ValueError("features must contain only finite numbers")
+        parameters = np.asarray((*self.weights, self.bias), dtype=float)
+        if not np.isfinite(parameters).all():
+            raise ValueError("model parameters must contain only finite numbers")
         logits = matrix @ np.asarray(self.weights, dtype=float) + self.bias
         probabilities = 1.0 / (1.0 + np.exp(-logits))
         return [
