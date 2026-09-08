@@ -11,7 +11,6 @@ from pydantic import BaseModel, Field
 from batcher import DynamicBatcher
 from inference.model import LinearRiskModel
 
-
 REQUESTS = Counter("inference_requests_total", "Total inference requests", ["status"])
 LATENCY = Histogram(
     "inference_request_seconds",
