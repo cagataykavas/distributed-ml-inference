@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from contextlib import asynccontextmanager
 import asyncio
 import time
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Response
-from pydantic import BaseModel, Field
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest
+from pydantic import BaseModel, Field
 
 from batcher import DynamicBatcher
 from inference.model import LinearRiskModel
