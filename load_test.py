@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-from statistics import mean, quantiles
 import time
+from statistics import mean, quantiles
 
 import httpx
 
@@ -23,6 +23,7 @@ async def run(base_url: str, requests: int, concurrency: int) -> None:
     latencies: list[float] = []
 
     async with httpx.AsyncClient(timeout=10) as client:
+
         async def guarded(index: int) -> None:
             async with semaphore:
                 latencies.append(await run_request(client, f"{base_url}/predict", index))
@@ -32,7 +33,11 @@ async def run(base_url: str, requests: int, concurrency: int) -> None:
         elapsed = time.perf_counter() - started
 
     sorted_latencies = sorted(latencies)
-    p95 = quantiles(sorted_latencies, n=100, method="inclusive")[94] if len(latencies) > 1 else latencies[0]
+    p95 = (
+        quantiles(sorted_latencies, n=100, method="inclusive")[94]
+        if len(latencies) > 1
+        else latencies[0]
+    )
     print(f"requests:       {requests}")
     print(f"concurrency:    {concurrency}")
     print(f"throughput_rps: {requests / elapsed:.2f}")
