@@ -17,9 +17,7 @@ class Clock:
 
 def test_consecutive_failures_open_and_success_resets() -> None:
     clock = Clock()
-    breaker = CircuitBreaker(
-        failure_threshold=2, recovery_timeout_seconds=10, clock=clock
-    )
+    breaker = CircuitBreaker(failure_threshold=2, recovery_timeout_seconds=10, clock=clock)
 
     breaker.record_failure()
     breaker.record_success()
@@ -41,9 +39,7 @@ def test_consecutive_failures_open_and_success_resets() -> None:
 
 def test_half_open_probe_closes_breaker_after_success() -> None:
     clock = Clock()
-    breaker = CircuitBreaker(
-        failure_threshold=1, recovery_timeout_seconds=5, clock=clock
-    )
+    breaker = CircuitBreaker(failure_threshold=1, recovery_timeout_seconds=5, clock=clock)
     breaker.record_failure()
     clock.now = 5
 
@@ -59,9 +55,7 @@ def test_half_open_probe_closes_breaker_after_success() -> None:
 
 def test_failed_probe_reopens_for_a_full_recovery_window() -> None:
     clock = Clock()
-    breaker = CircuitBreaker(
-        failure_threshold=1, recovery_timeout_seconds=5, clock=clock
-    )
+    breaker = CircuitBreaker(failure_threshold=1, recovery_timeout_seconds=5, clock=clock)
     breaker.record_failure()
     clock.now = 5
     breaker.before_call()
@@ -76,9 +70,7 @@ def test_failed_probe_reopens_for_a_full_recovery_window() -> None:
 
 def test_only_one_concurrent_half_open_probe_is_admitted() -> None:
     clock = Clock()
-    breaker = CircuitBreaker(
-        failure_threshold=1, recovery_timeout_seconds=1, clock=clock
-    )
+    breaker = CircuitBreaker(failure_threshold=1, recovery_timeout_seconds=1, clock=clock)
     breaker.record_failure()
     clock.now = 1
 
