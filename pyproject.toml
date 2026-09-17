@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "distributed-ml-inference"
-version = "0.3.0"
-description = "Bounded async ML inference runtime with atomic model reloads and SLO evidence"
+version = "0.4.0"
+description = "Bounded async ML inference runtime with atomic model reloads, failure isolation and SLO evidence"
 requires-python = ">=3.11"
 dependencies = [
   "fastapi>=0.115",

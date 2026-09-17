@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/cagataykavas/distributed-ml-inference/actions/workflows/ci.yml/badge.svg)](https://github.com/cagataykavas/distributed-ml-inference/actions/workflows/ci.yml)
 
-A production-shaped Python inference runtime focused on the hard part around a model: **bounded admission, cancellation-safe dynamic batching, deadlines, lifecycle-safe shutdown, atomic model reloads, observability and reproducible SLO evidence**.
+A production-shaped Python inference runtime focused on the hard part around a model: **bounded admission, cancellation-safe dynamic batching, deadlines, lifecycle-safe shutdown, atomic model reloads, model-failure isolation, observability and reproducible SLO evidence**.
 
 The bundled NumPy classifier is deliberately deterministic. The engineering subject is the serving control plane, not a fabricated accuracy claim.
 
@@ -14,7 +14,9 @@ flowchart LR
     A -->|accepted| Q[Bounded queue]
     A -->|full| O[429 + Retry-After]
     Q --> B[Dynamic batcher]
-    B --> S[Model snapshot]
+    B --> CB[Failure circuit]
+    CB --> S[Model snapshot]
+    CB -->|open| F[503 + Retry-After]
     S --> R[Per-request futures]
     M[Validated reload] -->|atomic swap| S
     A --> T[Metrics + runtime state]
@@ -34,6 +36,7 @@ One request has exactly one terminal outcome. A queue-full request is rejected i
 | Shutdown | readiness closes before drain/cancel; queued futures receive a terminal error | lifecycle tests |
 | Reload | candidate warm-up precedes an atomic snapshot swap | in-flight old/new version test |
 | Bad model | non-finite candidate parameters never replace the active generation | quarantine test |
+| Repeated failure | consecutive model failures open a circuit; one half-open probe controls recovery | state-machine, concurrency and HTTP tests |
 
 ## API surface
 
@@ -41,7 +44,7 @@ One request has exactly one terminal outcome. A queue-full request is rejected i
 |---|---|---|
 | `GET` | `/health` | process liveness only |
 | `GET` | `/ready` | admission readiness, model generation and capacity |
-| `GET` | `/runtime` | queue/in-flight/counter snapshot |
+| `GET` | `/runtime` | queue, model and circuit-breaker snapshot |
 | `POST` | `/predict` | deadline-bound inference |
 | `POST` | `/admin/models/reload` | authenticated, validated atomic model swap |
 | `GET` | `/metrics` | Prometheus request, latency, queue and generation metrics |
@@ -66,7 +69,11 @@ curl -s http://localhost:8000/predict \
 | `INFERENCE_MAX_QUEUE_SIZE` | 256 | hard admission capacity |
 | `INFERENCE_REQUEST_TIMEOUT_MS` | 2000 | request deadline including queue time |
 | `INFERENCE_SHUTDOWN_TIMEOUT_MS` | 5000 | graceful drain budget |
+| `INFERENCE_CIRCUIT_FAILURE_THRESHOLD` | 5 | consecutive failed model batches before opening |
+| `INFERENCE_CIRCUIT_RECOVERY_MS` | 30000 | open-state delay before a single recovery probe |
 | `INFERENCE_ADMIN_TOKEN` | unset | enables protected reload endpoint |
+
+The circuit breaker counts failed **model batches**, not individual requests, so one batched backend failure cannot inflate the threshold. While open, requests fail fast with HTTP 503 and `Retry-After`; after the recovery window, a lock-protected half-open state admits exactly one probe. A successful probe closes the circuit, while a failed probe starts a fresh recovery window. `/ready`, `/runtime`, and `inference_circuit_open` expose the state for orchestration and alerting.
 
 ## SLO-gated load evidence
 
@@ -98,6 +105,7 @@ The multi-stage container builds a wheel, installs only runtime dependencies, ru
 ```text
 batcher.py                  bounded batching runtime + lifecycle
 inference/config.py         validated environment configuration
+inference/circuit_breaker.py thread-safe model failure isolation
 inference/model.py          deterministic model adapter
 inference/runtime.py        versioned atomic model snapshots
 inference/service.py        app factory, HTTP policy, metrics
