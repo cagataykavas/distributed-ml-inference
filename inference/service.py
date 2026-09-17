@@ -16,6 +16,7 @@ from prometheus_client import (
 from pydantic import BaseModel, Field
 
 from batcher import BatcherClosed, DynamicBatcher, InferenceTimeout, QueueOverloaded
+from inference.circuit_breaker import CircuitBreaker, CircuitOpen
 from inference.config import Settings
 from inference.model import LinearRiskModel
 from inference.runtime import ModelManager
@@ -43,9 +44,14 @@ class ReloadRequest(BaseModel):
 def create_app(
     settings: Settings | None = None,
     manager: ModelManager | None = None,
+    circuit_breaker: CircuitBreaker | None = None,
 ) -> FastAPI:
     config = settings or Settings.from_env()
     model_manager = manager or ModelManager(LinearRiskModel())
+    breaker = circuit_breaker or CircuitBreaker(
+        failure_threshold=config.circuit_failure_threshold,
+        recovery_timeout_seconds=config.circuit_recovery_ms / 1000,
+    )
     registry = CollectorRegistry()
     requests = Counter(
         "inference_requests_total", "Total inference requests", ["status"], registry=registry
@@ -65,8 +71,24 @@ def create_app(
     model_generation = Gauge(
         "inference_model_generation", "Atomically loaded model generation", registry=registry
     )
+    circuit_open = Gauge(
+        "inference_circuit_open",
+        "Whether inference is blocked by the model circuit breaker",
+        registry=registry,
+    )
+
+    def guarded_predict(rows: list[list[float]]) -> list[dict[str, float | int | str]]:
+        breaker.before_call()
+        try:
+            outputs = model_manager.predict_batch(rows)
+        except Exception:  # noqa: BLE001 - model boundary failures trip the breaker.
+            breaker.record_failure()
+            raise
+        breaker.record_success()
+        return outputs
+
     batcher: DynamicBatcher[list[float], dict[str, float | int | str]] = DynamicBatcher(
-        model_manager.predict_batch,
+        guarded_predict,
         max_batch_size=config.max_batch_size,
         max_wait_ms=config.max_wait_ms,
         max_queue_size=config.max_queue_size,
@@ -82,12 +104,13 @@ def create_app(
 
     application = FastAPI(
         title="Distributed ML Inference",
-        version="0.3.0",
-        description="Bounded, observable inference runtime with atomic model reloads.",
+        version="0.4.0",
+        description="Bounded inference runtime with atomic reloads and failure isolation.",
         lifespan=lifespan,
     )
     application.state.batcher = batcher
     application.state.model_manager = model_manager
+    application.state.circuit_breaker = breaker
 
     @application.get("/health")
     async def health() -> dict[str, str]:
@@ -97,17 +120,24 @@ def create_app(
     async def ready() -> dict[str, object]:
         if not batcher.is_ready:
             raise HTTPException(status_code=503, detail="batch runtime is not accepting work")
+        if not breaker.is_available:
+            raise HTTPException(status_code=503, detail="model circuit is open")
         return {
             "status": "ready",
             "model": model_manager.snapshot.metadata(),
             "runtime": batcher.snapshot(),
             "max_batch_size": config.max_batch_size,
             "max_wait_ms": config.max_wait_ms,
+            "circuit_breaker": breaker.snapshot(),
         }
 
     @application.get("/runtime")
     async def runtime() -> dict[str, object]:
-        return {"model": model_manager.snapshot.metadata(), "batcher": batcher.snapshot()}
+        return {
+            "model": model_manager.snapshot.metadata(),
+            "batcher": batcher.snapshot(),
+            "circuit_breaker": breaker.snapshot(),
+        }
 
     @application.post("/predict", response_model=PredictionResponse)
     async def predict(request: PredictionRequest) -> PredictionResponse:
@@ -127,6 +157,13 @@ def create_app(
         except InferenceTimeout as exc:
             requests.labels(status="timeout").inc()
             raise HTTPException(status_code=504, detail="inference deadline exceeded") from exc
+        except CircuitOpen as exc:
+            requests.labels(status="circuit_open").inc()
+            raise HTTPException(
+                status_code=503,
+                detail="model circuit is open",
+                headers={"Retry-After": str(max(1, round(exc.retry_after_seconds)))},
+            ) from exc
         except BatcherClosed as exc:
             requests.labels(status="unavailable").inc()
             raise HTTPException(status_code=503, detail="inference runtime unavailable") from exc
@@ -174,6 +211,7 @@ def create_app(
         queue_depth.set(int(runtime_snapshot["queue_depth"]))
         in_flight.set(int(runtime_snapshot["in_flight"]))
         model_generation.set(model_manager.snapshot.generation)
+        circuit_open.set(breaker.snapshot()["state"] != "closed")
         return Response(generate_latest(registry), media_type=CONTENT_TYPE_LATEST)
 
     return application
