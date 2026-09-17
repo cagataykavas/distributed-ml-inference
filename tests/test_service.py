@@ -75,3 +75,22 @@ async def test_readiness_is_distinct_from_liveness_before_startup() -> None:
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         assert (await client.get("/health")).status_code == 200
         assert (await client.get("/ready")).status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_open_model_circuit_fails_fast_and_changes_readiness() -> None:
+    app = create_app(Settings(circuit_failure_threshold=1, circuit_recovery_ms=30_000))
+    app.state.circuit_breaker.record_failure()
+
+    async with app.router.lifespan_context(app):  # noqa: SIM117 - explicit lifecycle under test.
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            prediction = await client.post("/predict", json={"features": [0, 0, 0, 0]})
+            assert prediction.status_code == 503
+            assert prediction.headers["Retry-After"] == "30"
+            assert prediction.json()["detail"] == "model circuit is open"
+
+            readiness = await client.get("/ready")
+            assert readiness.status_code == 503
+            runtime = (await client.get("/runtime")).json()
+            assert runtime["circuit_breaker"]["state"] == "open"
+            assert runtime["circuit_breaker"]["rejected_calls"] == 1
