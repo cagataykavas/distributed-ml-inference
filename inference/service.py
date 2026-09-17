@@ -81,7 +81,7 @@ def create_app(
         breaker.before_call()
         try:
             outputs = model_manager.predict_batch(rows)
-        except Exception:  # noqa: BLE001 - model boundary failures trip the breaker.
+        except Exception:
             breaker.record_failure()
             raise
         breaker.record_success()
