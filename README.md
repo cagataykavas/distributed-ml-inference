@@ -118,4 +118,4 @@ python reference_benchmark.py
 docker build -t distributed-ml-inference .
 ```
 
-CI verifies source quality, 18 behavioral tests, an isolated wheel import, SLO artifact generation, a multi-stage image build and a live container readiness probe.
+CI verifies source quality, behavioral tests, an isolated wheel import, SLO artifact generation, a multi-stage image build and a live container readiness probe.

@@ -30,6 +30,14 @@ flowchart LR
 
 The public entry point should be the load balancer, not every model container. The service security group therefore accepts port 8000 only from the ALB security group. Tasks can still fetch dependencies or contact external services through controlled outbound routing.
 
+## Retry traffic amplification
+
+Network retries need one explicit owner. Layering retries at the gateway, service client, and
+transport multiplies backend attempts during the failure it is meant to absorb. The
+[retry topology admission gate](retry-topology-audit.md) checks that multiplication together with
+timeout nesting, backoff jitter, retry budgets, `Retry-After`, and non-idempotent operations. It
+emits a machine-readable pass/fail decision without sending traffic.
+
 ## Interview prompts
 
 1. Why use two Availability Zones?
