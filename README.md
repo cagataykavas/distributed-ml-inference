@@ -90,7 +90,10 @@ budgets, transient conditions, `Retry-After`, and non-idempotent replay safety b
 `envoy_retry_adapter.py` derives that evidence from one reviewed static Envoy route and its cluster
 retry budget, while rejecting unsafe response policies, runtime header overrides, dynamic routing,
 and unbound POST/PATCH idempotency assertions. See
-[`docs/envoy-retry-adapter.md`](docs/envoy-retry-adapter.md).
+[`docs/envoy-retry-adapter.md`](docs/envoy-retry-adapter.md). The
+[`runtime attestation gate`](docs/envoy-runtime-attestation.md) authenticates a fresh Envoy admin
+config dump, re-derives the same route policy, and reports semantic drift without claiming runtime
+traffic behavior.
 
 ## Model boundary and reload semantics
 
@@ -114,6 +117,7 @@ load_test.py                external SLO-gated load runner
 reference_benchmark.py      deterministic CI evidence producer
 retry_topology_audit.py     layered retry amplification/deadline gate
 envoy_retry_adapter.py      static Envoy route + cluster-budget normalizer
+envoy_runtime_attestation.py authenticated runtime config-dump drift gate
 tests/                      concurrency, lifecycle, API and SLO tests
 infra/aws/                  deployment topology
 ```

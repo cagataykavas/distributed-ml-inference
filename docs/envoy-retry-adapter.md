@@ -92,8 +92,9 @@ duplicate fields, non-finite values, symlinks, non-regular files, read-time muta
 2 MiB. The adapter output contains route identifiers and normalized controls, not endpoints,
 credentials, headers, or request data.
 
-This is a static admission adapter, not live enforcement evidence. It does not query Envoy's admin
-config dump or metrics, authenticate the configuration producer, prove that the selected artifact
-was deployed, validate DNS/TLS/upstream identity, or measure retry-budget exhaustion. Production
-follow-up should compare the accepted digest with the deployed config dump and correlate it with
-low-cardinality retry-attempt, overflow, timeout, and budget-exhaustion metrics.
+This is a static admission adapter, not live enforcement evidence. The separate
+[`envoy_runtime_attestation.py`](envoy-runtime-attestation.md) gate authenticates a fresh admin
+config dump and compares its normalized policy, but neither tool proves traffic used that process,
+validates DNS/TLS/upstream identity, or measures retry-budget exhaustion. Production follow-up
+should correlate the attestation with low-cardinality retry-attempt, overflow, timeout, and
+budget-exhaustion metrics.
