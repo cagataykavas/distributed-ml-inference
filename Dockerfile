@@ -1,7 +1,7 @@
 FROM python:3.12-slim AS builder
 
 WORKDIR /build
-COPY pyproject.toml README.md batcher.py envoy_retry_adapter.py retry_topology_audit.py ./
+COPY pyproject.toml README.md batcher.py envoy_retry_adapter.py envoy_runtime_attestation.py retry_topology_audit.py ./
 COPY inference ./inference
 RUN pip wheel --no-cache-dir --wheel-dir /wheels .
 

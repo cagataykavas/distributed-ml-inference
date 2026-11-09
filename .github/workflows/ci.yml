@@ -26,7 +26,7 @@ jobs:
         run: |
           python -m venv /tmp/inference-wheel
           /tmp/inference-wheel/bin/pip install dist/*.whl
-          /tmp/inference-wheel/bin/python -c "from inference.service import app; import envoy_retry_adapter, retry_topology_audit; assert app.title == 'Distributed ML Inference'"
+          /tmp/inference-wheel/bin/python -c "from inference.service import app; import envoy_retry_adapter, envoy_runtime_attestation, retry_topology_audit; assert app.title == 'Distributed ML Inference'"
       - name: Produce SLO-gated reference evidence
         run: python reference_benchmark.py --requests 200 --concurrency 32
       - uses: actions/upload-artifact@v4
