@@ -75,7 +75,10 @@ class RetryLayer:
         if not self.retries or self.backoff_base_ms <= 0:
             return 0
         return sum(
-            min(self.backoff_cap_ms, self.backoff_base_ms * (2**retry_index))
+            min(
+                self.backoff_cap_ms,
+                self.backoff_base_ms * (2 ** (retry_index + 1) - 1),
+            )
             for retry_index in range(self.max_attempts - 1)
         )
 

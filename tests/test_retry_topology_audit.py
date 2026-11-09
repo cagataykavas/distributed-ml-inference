@@ -97,6 +97,18 @@ def test_retry_window_must_fit_end_to_end_deadline() -> None:
     assert "retry_window_exceeds_deadline" in codes(audit_policy(parse(data)))
 
 
+def test_retry_window_uses_conservative_fully_jittered_backoff_bound() -> None:
+    data = safe_policy()
+    data["layers"][0]["max_attempts"] = 3  # type: ignore[index]
+    data["operation"]["deadline_ms"] = 2_301  # type: ignore[index]
+
+    report = audit_policy(parse(data))
+
+    # Three 700 ms attempts plus retry gaps bounded at 50 ms and 150 ms.
+    assert report["metrics"]["worst_case_window_ms"] == 2_300  # type: ignore[index]
+    assert "retry_window_exceeds_deadline" not in codes(report)
+
+
 @pytest.mark.parametrize(
     ("field", "value", "expected"),
     [

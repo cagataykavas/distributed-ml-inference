@@ -73,5 +73,8 @@ exponential backoff between attempts. Working from the transport outward, each p
 contain the complete inner retry window. This is intentionally conservative and assumes sequential
 attempts; hedging and parallel fan-out need a separate concurrency-aware model.
 
-The next integration step is to export the same policy from the HTTP client or service-mesh config,
-then compare declared retry budgets with live retry-attempt and budget-exhaustion metrics.
+`envoy_retry_adapter.py` now exports the same policy from a bounded static Envoy route and cluster
+budget. See [`envoy-retry-adapter.md`](envoy-retry-adapter.md) for the supported retry subset,
+runtime-header override controls, idempotency assertion, and deployment trust boundary. The next
+integration step is to bind its config digest to a deployed Envoy config dump and compare declared
+budgets with live retry-attempt and budget-exhaustion metrics.
