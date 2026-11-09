@@ -83,6 +83,15 @@ python load_test.py \
 
 CI also runs an in-process deterministic reference profile and uploads `inference-reference-evidence`. This is regression evidence for the implementation—not a cloud capacity claim.
 
+## Retry topology admission
+
+`retry_topology_audit.py` evaluates multiplicative attempts, nested deadlines, backoff, retry
+budgets, transient conditions, `Retry-After`, and non-idempotent replay safety before rollout.
+`envoy_retry_adapter.py` derives that evidence from one reviewed static Envoy route and its cluster
+retry budget, while rejecting unsafe response policies, runtime header overrides, dynamic routing,
+and unbound POST/PATCH idempotency assertions. See
+[`docs/envoy-retry-adapter.md`](docs/envoy-retry-adapter.md).
+
 ## Model boundary and reload semantics
 
 `ModelAdapter` exposes a typed `predict_batch` contract. `ModelManager` stores an immutable generation snapshot. A batch captures that snapshot once; if a reload completes while the batch is executing, every item in that batch still reports the old version and the following batch uses the new version. ONNX Runtime, PyTorch, TensorRT or a remote endpoint can implement the same boundary.
@@ -103,6 +112,8 @@ inference/runtime.py        versioned atomic model snapshots
 inference/service.py        app factory, HTTP policy, metrics
 load_test.py                external SLO-gated load runner
 reference_benchmark.py      deterministic CI evidence producer
+retry_topology_audit.py     layered retry amplification/deadline gate
+envoy_retry_adapter.py      static Envoy route + cluster-budget normalizer
 tests/                      concurrency, lifecycle, API and SLO tests
 infra/aws/                  deployment topology
 ```
