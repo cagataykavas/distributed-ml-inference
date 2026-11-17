@@ -18,6 +18,7 @@ class Settings:
     max_queue_size: int = 256
     request_timeout_ms: int = 2_000
     shutdown_timeout_ms: int = 5_000
+    max_request_body_bytes: int = 16_384
     admin_token: str | None = None
 
     @classmethod
@@ -28,5 +29,6 @@ class Settings:
             max_queue_size=_positive_int("INFERENCE_MAX_QUEUE_SIZE", 256),
             request_timeout_ms=_positive_int("INFERENCE_REQUEST_TIMEOUT_MS", 2_000),
             shutdown_timeout_ms=_positive_int("INFERENCE_SHUTDOWN_TIMEOUT_MS", 5_000),
+            max_request_body_bytes=_positive_int("INFERENCE_MAX_REQUEST_BODY_BYTES", 16_384),
             admin_token=os.getenv("INFERENCE_ADMIN_TOKEN"),
         )
