@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/cagataykavas/distributed-ml-inference/actions/workflows/ci.yml/badge.svg)](https://github.com/cagataykavas/distributed-ml-inference/actions/workflows/ci.yml)
 
-A production-shaped Python inference runtime focused on the hard part around a model: **bounded admission, cancellation-safe dynamic batching, deadlines, lifecycle-safe shutdown, atomic model reloads, observability and reproducible SLO evidence**.
+A production-shaped Python inference runtime focused on the hard part around a model: **bounded HTTP and queue admission, cancellation-safe dynamic batching, deadlines, lifecycle-safe shutdown, atomic model reloads, observability and reproducible SLO evidence**.
 
 The bundled NumPy classifier is deliberately deterministic. The engineering subject is the serving control plane, not a fabricated accuracy claim.
 
@@ -26,6 +26,7 @@ One request has exactly one terminal outcome. A queue-full request is rejected i
 
 | Concern | Runtime behavior | Evidence |
 |---|---|---|
+| HTTP body | framing-aware byte limit before JSON decoding; ambiguous lengths fail closed | chunked/framing admission tests |
 | Overload | `put_nowait` against a configured capacity; HTTP 429 with `Retry-After` | deterministic saturation test |
 | Cancellation | cancelled queued futures are filtered before model execution | predictor input assertion |
 | Deadline | end-to-end timeout cancels the future; later batches recover | timeout/recovery test |
@@ -66,7 +67,15 @@ curl -s http://localhost:8000/predict \
 | `INFERENCE_MAX_QUEUE_SIZE` | 256 | hard admission capacity |
 | `INFERENCE_REQUEST_TIMEOUT_MS` | 2000 | request deadline including queue time |
 | `INFERENCE_SHUTDOWN_TIMEOUT_MS` | 5000 | graceful drain budget |
+| `INFERENCE_MAX_REQUEST_BODY_BYTES` | 16384 | maximum HTTP request body before parsing |
 | `INFERENCE_ADMIN_TOKEN` | unset | enables protected reload endpoint |
+
+The body limit is enforced while ASGI request chunks are consumed, not only from the
+`Content-Length` header. Duplicate lengths, conflicting `Content-Length`/`Transfer-Encoding`,
+unsupported transfer codings and declared/observed length mismatches are rejected before FastAPI
+parses JSON. HTTP/1.x rejection responses request connection close so an unread oversized stream
+cannot be reused as a second request. This is application-layer defense in depth; the load balancer
+and ASGI server still need compatible header and request-size limits.
 
 ## SLO-gated load evidence
 

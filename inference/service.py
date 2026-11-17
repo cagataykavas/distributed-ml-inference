@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 
 from batcher import BatcherClosed, DynamicBatcher, InferenceTimeout, QueueOverloaded
 from inference.config import Settings
+from inference.http_admission import RequestBodyAdmissionMiddleware
 from inference.model import LinearRiskModel
 from inference.runtime import ModelManager
 
@@ -85,6 +86,10 @@ def create_app(
         version="0.3.0",
         description="Bounded, observable inference runtime with atomic model reloads.",
         lifespan=lifespan,
+    )
+    application.add_middleware(
+        RequestBodyAdmissionMiddleware,
+        max_body_bytes=config.max_request_body_bytes,
     )
     application.state.batcher = batcher
     application.state.model_manager = model_manager
