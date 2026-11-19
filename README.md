@@ -91,7 +91,7 @@ CI also runs an in-process deterministic reference profile and uploads `inferenc
 
 The multi-stage container builds a wheel, installs only runtime dependencies, runs as UID `10001`, and exposes a liveness healthcheck. One Uvicorn worker is intentional because the queue and model generation are process-local; horizontal scale should use replicas.
 
-`infra/aws/` describes the surrounding VPC, public/private subnet separation, ALB-to-service security boundary, ECR and ECS cluster. `docs/networking.md` records routing and autoscaling tradeoffs. Infrastructure is an explicit deployment mapping, not proof that synthetic benchmarks represent a particular GPU instance.
+`infra/aws/` describes the surrounding VPC, public/private subnet separation, AZ-local private egress, ALB-to-service security boundary, ECR and ECS cluster. `docs/networking.md` records routing and autoscaling tradeoffs. Infrastructure is an explicit deployment mapping, not proof that synthetic benchmarks represent a particular GPU instance.
 
 ## Repository map
 
@@ -116,6 +116,9 @@ pytest -q
 python -m build
 python reference_benchmark.py
 docker build -t distributed-ml-inference .
+terraform -chdir=infra/aws fmt -check
+terraform -chdir=infra/aws init -backend=false
+terraform -chdir=infra/aws validate
 ```
 
-CI verifies source quality, 18 behavioral tests, an isolated wheel import, SLO artifact generation, a multi-stage image build and a live container readiness probe.
+CI verifies source quality, 19 behavioral/topology tests, an isolated wheel import, SLO artifact generation, a multi-stage image build, a live container readiness probe and Terraform formatting/provider validation.
