@@ -10,7 +10,7 @@ flowchart LR
     ECS --> REDIS[(ElastiCache / Redis)]
     ECS --> S3[(S3 model artifacts)]
     ECS --> CW[CloudWatch]
-    ECS --> NAT[NAT Gateway]
+    ECS --> NAT[AZ-local NAT Gateways]
     NAT --> IGW[Internet Gateway]
 ```
 
@@ -29,6 +29,8 @@ flowchart LR
 ## Why inference tasks are private
 
 The public entry point should be the load balancer, not every model container. The service security group therefore accepts port 8000 only from the ALB security group. Tasks can still fetch dependencies or contact external services through controlled outbound routing.
+
+Each private subnet has its own route table and sends default traffic to a NAT Gateway in the same Availability Zone. This avoids cross-AZ egress charges and prevents the loss of one NAT Gateway or public subnet from removing outbound connectivity from healthy tasks in the other zone. The tradeoff is the fixed cost of one NAT Gateway per zone; deployments that do not require general internet egress should prefer private service endpoints where possible.
 
 ## Interview prompts
 
